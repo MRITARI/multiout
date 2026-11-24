@@ -81,6 +81,7 @@ struct Output {
     std::thread th;
     Ring ring;
     std::atomic<int> delayMs{0};
+    std::atomic<unsigned long long> written{0};
     HWND label = nullptr, slider = nullptr, btn = nullptr, dSlider = nullptr, dText = nullptr, vText = nullptr;
 };
 
@@ -88,6 +89,7 @@ static HWND g_hwnd, g_plus, g_title;
 static std::mutex g_mtx;                              // guards g_outs
 static std::vector<std::unique_ptr<Output>> g_outs;
 static std::atomic<bool> g_run{true};
+static std::atomic<unsigned long long> g_capFrames{0}, g_capSilent{0};
 static std::thread g_capThread;
 static IAudioClient* g_capClient = nullptr;
 static IAudioCaptureClient* g_capSvc = nullptr;
@@ -161,6 +163,8 @@ static void CaptureLoop() {
             BYTE* data; UINT32 frames; DWORD flags;
             if (FAILED(g_capSvc->GetBuffer(&data, &frames, &flags, nullptr, nullptr))) return;
             size_t samples = (size_t)frames * g_ch;
+            g_capFrames += frames;
+            if (flags & AUDCLNT_BUFFERFLAGS_SILENT) g_capSilent += frames;
             const float* src = (const float*)data;
             if (flags & AUDCLNT_BUFFERFLAGS_SILENT) {
                 if (zeros.size() < samples) zeros.assign(samples, 0.f);
@@ -220,6 +224,7 @@ static void OutputLoop(Output* o) {
             float v = o->vol;
             for (size_t i = 0; i < got; i++) f[i] *= v;
             rc->ReleaseBuffer(n, 0);
+            o->written += n;
         }
         ac->Stop();
     }
@@ -354,6 +359,18 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             SetWindowText(d->dText, t.c_str());
         }
         return 0;
+    case WM_TIMER: {
+        std::wstring c = L"MultiOut cap " + std::to_wstring(g_capFrames / 1000) + L"k sil " +
+                         std::to_wstring(g_capSilent / 1000) + L"k " + std::to_wstring(g_ch) + L"ch " +
+                         std::to_wstring(g_rate / 1000) + L"k";
+        SetWindowText(h, c.c_str());
+        std::lock_guard<std::mutex> l(g_mtx);
+        for (auto& o : g_outs) {
+            std::wstring t = o->name + L" [out " + std::to_wstring(o->written / 1000) + L"k]";
+            SetWindowText(o->label, t.c_str());
+        }
+        return 0;
+    }
     case WM_OUT_FAILED: {
         Output* o = (Output*)wp;
         bool exists = false;
@@ -409,6 +426,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, PWSTR, int show) {
     SetWindowPos(g_title, nullptr, 60, 17, 310, 16, SWP_NOZORDER);
     Layout();
     g_capThread = std::thread(CaptureLoop);
+    SetTimer(g_hwnd, 1, 500, nullptr);
     ShowWindow(g_hwnd, show);
 
     MSG m;
