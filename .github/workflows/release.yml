@@ -13,7 +13,7 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Build
         shell: cmd
-        run: cl /nologo /O2 /MT /EHsc /DUNICODE /D_UNICODE multiout.cpp /Fe:multiout.exe /link /SUBSYSTEM:WINDOWS user32.lib ole32.lib comctl32.lib winmm.lib
+        run: cl /nologo /O2 /MT /EHsc /DUNICODE /D_UNICODE multiout.cpp /Fe:multiout.exe /link /SUBSYSTEM:WINDOWS user32.lib ole32.lib comctl32.lib winmm.lib gdi32.lib
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         shell: bash
